@@ -170,6 +170,15 @@ def qr_svg(url: str) -> str:
 def _fmt(v):
     if isinstance(v, (int, float)) and not isinstance(v, bool):
         return f"{v:,.2f}".rstrip("0").rstrip(".").replace(",", " ")
+    if isinstance(v, dict) and ("company" in v or "name" in v):
+        st = {"company": "юридическое лицо", "ip": "индивидуальный предприниматель", "self_employed": "самозанятый",
+              "individual": "физическое лицо"}.get(v.get("status"), v.get("status") or "")
+        idn = (f"ИНН {v['inn']}" if v.get("inn") and len(str(v["inn"])) == 9 else
+               f"рег. № {v['inn']}" if v.get("inn") else "")
+        name = v.get("company") or v.get("name")
+        rep = f" (в лице {v['name']})" if v.get("company") and v.get("name") and v["name"] != v["company"] else ""
+        return (f"<b>{html.escape(name)}</b>{html.escape(rep)}<br><span class='muted'>"
+                + html.escape(", ".join(x for x in (st, idn, v.get("region"), v.get("note")) if x)) + "</span>")
     if isinstance(v, dict):
         return "<br>".join(f"{html.escape(str(k))}: {html.escape(str(x))}" for k, x in v.items())
     if isinstance(v, list):
@@ -208,8 +217,11 @@ h1{{font-size:24px;margin:0 0 4px}} .muted{{color:#66728A;font-size:13px}} table
 th{{text-align:left;width:210px;vertical-align:top;color:#46536B;font-weight:600;padding:8px 10px 8px 0;border-bottom:1px solid #E1E6EF}}
 td{{padding:8px 0;border-bottom:1px solid #E1E6EF}} ol{{margin:0;padding-left:18px}} .box{{display:flex;gap:20px;align-items:center;
 border:1px solid #E1E6EF;border-radius:12px;padding:14px 16px;margin-top:18px}} ul{{padding-left:18px}} .ok{{color:#0F8F8C;font-weight:600}}
-.bad{{color:#B4432B;font-weight:600}} @media print{{.noprint{{display:none}}}}</style></head><body>
-<div class="muted">UZEX 2035 · песочница · документ сформирован из данных сделки</div>
+.bad{{color:#B4432B;font-weight:600}} @media print{{.noprint{{display:none}}}}
+.hdr{{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #13213C;padding-bottom:10px;margin-bottom:16px;font-size:13px}}
+.hdr .mk{{font:700 15px/1 monospace;letter-spacing:.1em;border:2px solid #13213C;padding:8px 10px}}
+.muted{{color:#66728A}} button{{font:inherit;padding:8px 14px;border-radius:8px;border:1px solid #c9d1de;background:#fff;cursor:pointer}}</style></head><body>
+<div class="hdr"><div><b>UZEX 2035</b> · биржа агентов<br><span class="muted">Документ сформирован из данных сделки и подписан электронными подписями сторон. Песочница платформы.</span></div><div class="mk">UZEX</div></div>
 <h1>{html.escape(r['title'])}</h1><div class="muted">№ {doc_id} · сделка {html.escape(r['deal_id'] or '')}</div>
 <table>{rows}</table>
 <h3>Электронные подписи (Ed25519)</h3><ul>{sigs}</ul>
