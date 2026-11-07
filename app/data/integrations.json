@@ -1,0 +1,210 @@
+{
+  "_meta": {
+    "compiled": "2026-11-07",
+    "lang": "ru",
+    "verified_legend": {
+      "true": "проверено по официальной документации провайдера (страница открыта и прочитана)",
+      "partial": "часть данных из официальных источников, часть — из сторонних SDK/обёрток или СМИ; сверить перед продом",
+      "false": "официальная публичная документация недоступна/не найдена; данные не подтверждены"
+    }
+  },
+  "integrations": [
+    {
+      "key": "payme",
+      "name": "Payme Business (Paycom) — Merchant API",
+      "purpose": "Приём оплаты картами Uzcard/Humo через Payme: пользователь уходит на checkout.paycom.uz, Payme вызывает JSON-RPC методы на биллинге мерчанта (наш endpoint) для проверки и проведения транзакции.",
+      "auth": "Payme → мерчант: HTTP Basic, заголовок 'Authorization: Basic base64(login:password)'. Login выдаёт техспециалист Payme Business (обычно 'Paycom'), password — 36-символьный ключ веб-кассы (в песочнице — TEST_KEY). Запросы приходят только с IP 185.234.113.1–185.234.113.15. Неверная авторизация → ошибка -32504.",
+      "sandbox": "Да. Песочница https://test.paycom.uz (вводятся Merchant ID и TEST_KEY, прогоняются тест-сценарии). Чек в песочнице отправляется на https://test.paycom.uz, в проде — на https://checkout.paycom.uz. Адрес checkout.test.paycom.uz в официальной документации НЕ упоминается.",
+      "endpoints": [
+        {
+          "method": "GET (redirect)",
+          "url": "https://checkout.paycom.uz/{base64(params)}",
+          "fields": "params = 'm={merchant_id};ac.order_id={id};a={amount_tiyin};c={return_url};ct={ms};l={ru|uz|en};cr={ISO}' — пары key=value через ';', вся строка кодируется Base64. ac.<поле> должен совпадать с полем Account в настройках кассы. a — сумма в тийинах. Пример: m=587f72c72cac0d162c722ae2;ac.order_id=197;a=500 → https://checkout.paycom.uz/bT01ODdmNzJjNzJjYWMwZDE2MmM3MjJhZTI7YWMub3JkZXJfaWQ9MTk3O2E9NTAw"
+        },
+        {
+          "method": "POST (JSON-RPC 2.0, вызывает Payme)",
+          "url": "{merchant_endpoint_url} — CheckPerformTransaction",
+          "fields": "{method, params:{amount, account:{order_id}}, id} → result.allow=true | error -31001 (неверная сумма), -31050..-31099 (ошибки account, локализованный message обязателен)"
+        },
+        {
+          "method": "POST (JSON-RPC 2.0)",
+          "url": "{merchant_endpoint_url} — CreateTransaction",
+          "fields": "params:{id (paycom tx id), time (ms), amount, account} → result:{create_time, transaction, state:1, receivers?}. При потере ответа Payme повторяет запрос с теми же параметрами (идемпотентность обязательна)."
+        },
+        {
+          "method": "POST (JSON-RPC 2.0)",
+          "url": "{merchant_endpoint_url} — PerformTransaction",
+          "fields": "params:{id} → result:{transaction, perform_time, state:2}"
+        },
+        {
+          "method": "POST (JSON-RPC 2.0)",
+          "url": "{merchant_endpoint_url} — CancelTransaction",
+          "fields": "params:{id, reason} → result:{transaction, cancel_time, state:-1|-2}"
+        },
+        {
+          "method": "POST (JSON-RPC 2.0)",
+          "url": "{merchant_endpoint_url} — CheckTransaction",
+          "fields": "params:{id} → result:{create_time, perform_time, cancel_time, transaction, state, reason}"
+        },
+        {
+          "method": "POST (JSON-RPC 2.0)",
+          "url": "{merchant_endpoint_url} — GetStatement",
+          "fields": "params:{from, to} (ms) → result.transactions[]"
+        }
+      ],
+      "notes": "Только HTTP POST по HTTPS (TLS 1.0–1.2), Content-Type text/json; charset=UTF-8; ответ всегда HTTP 200 (иначе Payme считает -32400). Общие ошибки: -32300 (не POST), -32700 (парсинг JSON), -32600 (нет обязательных полей), -32601 (метод не найден), -32504 (нет привилегий/авторизации), -32400 (системная). Регистрация: аккаунт в Payme Business → создание веб-кассы → указать Endpoint URL → получить Merchant ID и ключи. Поддерживаются цепные платежи (receivers) — полезно для расщепления комиссии биржи/брокера.",
+      "docs_url": "https://developer.help.paycom.uz/",
+      "verified": "true"
+    },
+    {
+      "key": "click",
+      "name": "CLICK — SHOP API + платёжная ссылка",
+      "purpose": "Приём оплаты через CLICK (SuperApp, my.click.uz, USSD, Telegram-бот). Пользователь переходит по платёжной ссылке; CLICK шлёт на наш сервер два запроса — Prepare (проверка/резерв) и Complete (подтверждение).",
+      "auth": "Подпись запросов CLICK: sign_string = md5(click_trans_id + service_id + SECRET_KEY + merchant_trans_id + amount + action + sign_time) для Prepare; для Complete — md5(click_trans_id + service_id + SECRET_KEY + merchant_trans_id + merchant_prepare_id + amount + action + sign_time). SECRET_KEY выдаётся при подключении сервиса.",
+      "sandbox": "Официального тестового стенда CLICK нет; в документации есть браузерный Playground (Prepare/Complete против вашего сервера, предпросмотр sign_string) и генератор Postman-коллекции на 15 тест-сценариев (ошибки -1, -5, -6, -9 и т.д.).",
+      "endpoints": [
+        {
+          "method": "GET (redirect)",
+          "url": "https://my.click.uz/services/pay?service_id={service_id}&merchant_id={merchant_id}&amount={amount}&transaction_param={merchant_trans_id}&return_url={return_url}&card_type={uzcard|humo}",
+          "fields": "merchant_id*, service_id*, transaction_param* (= merchant_trans_id), amount* (формат N.NN, в сумах), merchant_user_id, return_url, card_type. Альтернатива — HTML-форма с теми же полями."
+        },
+        {
+          "method": "POST (CLICK → мерчант), application/x-www-form-urlencoded",
+          "url": "{merchant_prepare_url} — Prepare (action=0)",
+          "fields": "click_trans_id, service_id, click_paydoc_id, merchant_trans_id, amount (сумы, float), action=0, error, error_note, sign_time, sign_string → JSON {click_trans_id, merchant_trans_id, merchant_prepare_id, error, error_note}"
+        },
+        {
+          "method": "POST (CLICK → мерчант), application/x-www-form-urlencoded",
+          "url": "{merchant_complete_url} — Complete (action=1)",
+          "fields": "click_trans_id, service_id, click_paydoc_id, merchant_trans_id, merchant_prepare_id, amount, action=1, error, error_note, sign_time, sign_string → JSON {click_trans_id, merchant_trans_id, merchant_confirm_id, error, error_note}"
+        }
+      ],
+      "notes": "Коды ошибок мерчанта: 0 успех, -1 SIGN CHECK FAILED, -2 неверная сумма, -3 action not found, -4 already paid, -5 user/order не найден, -6 транзакция не найдена, -7 failed to update user, -8 error in request from click, -9 transaction cancelled. В Prepare нужно резервировать товар/лот. После успешного Prepare и списания Complete не может вернуть ошибку, кроме -4/-9. Есть также CLICK Merchant API (инициирование платежей, фискализация, Click Pass) и Split Shop. Регистрация: договор с CLICK как поставщик услуг → service_id, merchant_id, SECRET_KEY.",
+      "docs_url": "https://docs.click.uz/",
+      "verified": "true"
+    },
+    {
+      "key": "uzum_bank",
+      "name": "Uzum Bank — Checkout (эквайринг) и Merchant API",
+      "purpose": "Checkout: онлайн-оплата картами с привязкой карт, возвратами, статусами и фискализацией (hosted payment page). Merchant API: приём платежей внутри приложения Uzum Bank, вебхуки на сервер партнёра.",
+      "auth": "По стороннему зеркалу OpenAPI (api-evangelist, v1.10.3): Checkout — заголовки X-Terminal-Id и X-API-Key, выдаются Uzum Bank; Merchant API — HTTP Basic на вебхуках. Официальный портал рендерится JS-ом и не был прочитан полностью.",
+      "sandbox": "Не подтверждено публично. Подключение только через аккаунт-менеджера Uzum Bank.",
+      "endpoints": [
+        {
+          "method": "POST",
+          "url": "{checkout_base}/…/register (точный путь не подтверждён)",
+          "fields": "по зеркалу OpenAPI: регистрация заказа, payType=ONE_STEP → orderId + URL платёжной страницы; статусы COMPLETED / DECLINED / REFUNDED; отдельный refund-метод"
+        },
+        {
+          "method": "POST (Uzum → партнёр)",
+          "url": "{partner_webhook_base}/check | /create | /confirm | /reverse | /status (по описанию: проверка, создание, подтверждение, отмена)",
+          "fields": "не подтверждено"
+        }
+      ],
+      "notes": "Портал developer.uzumbank.uz перечисляет продукты: Checkout, Merchant API, FastPay, Dynamic QR, BaaS (Payment Hub), CrossBorder, RemitCore, Nasiya, Fiscalization. Фискализация в Checkout по умолчанию выключена, включается через менеджера. Для MVP — 3-й приоритет после Payme/Click.",
+      "docs_url": "https://developer.uzumbank.uz/",
+      "verified": "partial"
+    },
+    {
+      "key": "eskiz_sms",
+      "name": "Eskiz.uz — SMS-шлюз (notify.eskiz.uz)",
+      "purpose": "OTP и транзакционные SMS (подтверждение входа, уведомления о сделках/исполнении поручений агентом).",
+      "auth": "POST /api/auth/login (email, password) → JWT-токен; далее 'Authorization: Bearer {token}'. Обновление — PATCH /api/auth/refresh.",
+      "sandbox": "Тестовый статус аккаунта: можно отправлять только тексты «Это тест от Eskiz» / «Bu Eskiz dan test» / «This is test from Eskiz». Для боевых текстов — модерация шаблонов (POST /api/user/template) и подтверждённый nick (отправитель).",
+      "endpoints": [
+        { "method": "POST", "url": "https://notify.eskiz.uz/api/auth/login", "fields": "form-data: email, password" },
+        { "method": "PATCH", "url": "https://notify.eskiz.uz/api/auth/refresh", "fields": "Bearer token" },
+        { "method": "POST", "url": "https://notify.eskiz.uz/api/message/sms/send", "fields": "form-data: mobile_phone (998XXXXXXXXX), message, from (nick, напр. 4546), callback_url" },
+        { "method": "POST", "url": "https://notify.eskiz.uz/api/message/sms/send-batch", "fields": "JSON: messages[{user_sms_id, to, text}], from, dispatch_id" },
+        { "method": "POST", "url": "https://notify.eskiz.uz/api/user/template", "fields": "template (на модерацию)" },
+        { "method": "GET", "url": "https://notify.eskiz.uz/api/message/sms/status_by_id/{id}", "fields": "—" },
+        { "method": "GET", "url": "https://notify.eskiz.uz/api/user/get-limit", "fields": "баланс" }
+      ],
+      "notes": "Документация — публичная Postman-коллекция Eskiz (официальная). Также есть send-global (международные), normalizer/check (проверка символов SMS), отчёты. Регистрация: аккаунт на my.eskiz.uz + договор для юрлица. Playmobile (playmobile.uz) — альтернатива, публичная документация API не найдена (verified=false).",
+      "docs_url": "https://documenter.getpostman.com/view/663428/RzfmES4z",
+      "verified": "true"
+    },
+    {
+      "key": "myid",
+      "name": "MyID — биометрическая идентификация (KYC)",
+      "purpose": "Удалённая идентификация физлица: сверка лица (liveness + face match) с госбазой по ПИНФЛ/паспорту, возврат персональных данных. Нужна для онбординга участника биржи и выдачи «мандата» ИИ-агенту.",
+      "auth": "OAuth2-подобный. Redirect/Web: POST /api/v1/oauth2/access-token (grant_type=authorization_code|client_credentials, client_id, client_secret). Mobile SDK new flow: POST {myid_host}/api/v1/auth/clients/access-token {client_id, client_secret} → JWT (expires_in 604800). client_secret хранить только на бэкенде.",
+      "sandbox": "Да: Dev https://devmyid.uz/ (Web SDK: https://web.devmyid.uz/), Prod https://myid.uz/ (https://web.myid.uz/). Mobile SDK (Flutter/Android/iOS) имеет режим DEBUG. Доступы (client_id/secret, clientHash, clientHashId) выдаёт отдел продаж MyID — нужен договор.",
+      "endpoints": [
+        { "method": "GET (redirect)", "url": "https://myid.uz/api/v1/oauth2/authorization?client_id=&response_type=code&redirect_uri=&scope=address,contacts,doc_data,common_data&method=strong|simple&state=", "fields": "code живёт 300 с; при неудаче возвращается reason_code (2 неверный паспорт, 3 liveness, 34 документ просрочен и др.)" },
+        { "method": "POST", "url": "https://myid.uz/api/v1/oauth2/access-token", "fields": "x-www-form-urlencoded: grant_type=authorization_code, code, client_id, client_secret → access_token, refresh_token (в JWT зашит job_id — сохранить для аудита)" },
+        { "method": "GET", "url": "https://myid.uz/api/v1/users/me", "fields": "Authorization: Bearer → profile.common_data{first_name,last_name,middle_name,pinfl,gender,birth_date,birth_place,nationality,citizenship,…}, doc_data{pass_data,issued_by,issued_date,expiry_date,doc_type}, contacts{phone,email}, address{permanent_address,temporary_address}, authentication_method" },
+        { "method": "POST", "url": "https://myid.uz/api/v1/web/sessions", "fields": "Web SDK: Bearer; {max_retries, external_id (UUIDv4), ip_address (реальный IP пользователя)} → session_id; затем iframe/redirect https://web.myid.uz/?session_id=&birth_date=YYYY-MM-DD&pinfl=|pass_data=&redirect_uri=&iframe=true&lang=; результат: /api/v1/web/sessions/{session_id}/result" },
+        { "method": "POST", "url": "{myid_host}/api/v2/sdk/sessions", "fields": "Mobile SDK: {phone_number, birth_date, is_resident, pinfl | pass_data, threshold 0.85–0.99}; данные: GET /api/v1/sdk/data?code=, статус: /api/v1/sdk/sessions/{session_id}" }
+      ],
+      "notes": "Есть также 'Backend API (без перс. данных)' — только сравнение лица (compare), и QR inplace. Лимит в SDK: 5 неудачных попыток в час. Возвращаемые данные — персональные: требуется согласие пользователя, хранение по закону о персданных (локализация в РУз).",
+      "docs_url": "https://docs.myid.uz/",
+      "verified": "true"
+    },
+    {
+      "key": "e_imzo",
+      "name": "E-IMZO — ЭЦП (браузер, ID-карта, мобильный E-IMZO)",
+      "purpose": "Юридически значимая подпись поручений/договоров (PKCS#7, ГОСТ) ключом ЭЦП пользователя: вход по ЭЦП, подпись биржевой заявки или поручения агенту, подпись ЭСФ.",
+      "auth": "Браузер: на ПК стоит модуль E-IMZO; страница подключается по WebSocket к wss://127.0.0.1:64443/service/cryptapi (ws://127.0.0.1:64646 для http), вызывает CAPIWS.apikey([domain, key]) — API-ключ привязан к домену и выдаётся при регистрации (для localhost есть демо-ключи). Сервер: собственный E-IMZO-SERVER (docker/jar) у нас, проверяет подписи.",
+      "sandbox": "Да: https://test.e-imzo.uz/demo/ (демо), тестовые ключи — https://test.e-imzo.uz/registrator/public/ckc.html, эмулятор ID-карты wss://test.e-imzo.uz/idcard-emulator, тестовый TSA http://test.e-imzo.uz/cams/tst.",
+      "endpoints": [
+        { "method": "WS (браузер)", "url": "wss://127.0.0.1:64443/service/cryptapi", "fields": "CAPIWS.callFunction({plugin:'pkcs7', name:'create_pkcs7', arguments:[data_base64, keyId|'idcard'|'baikey'|'ckc', detached?]}); также list_all_certificates, load_key (PFX)" },
+        { "method": "GET", "url": "{E-IMZO-SERVER}/frontend/challenge", "fields": "challenge для входа по ЭЦП" },
+        { "method": "POST", "url": "{E-IMZO-SERVER}/backend/auth", "fields": "pkcs7 подписанного challenge → сертификат/ПИНФЛ/ИНН" },
+        { "method": "POST", "url": "{E-IMZO-SERVER}/frontend/timestamp/pkcs7", "fields": "pkcs7 → pkcs7 со штампом времени" },
+        { "method": "POST", "url": "{E-IMZO-SERVER}/backend/pkcs7/verify/attached", "fields": "pkcs7 (attached) → результат проверки + данные подписантов" },
+        { "method": "POST", "url": "{E-IMZO-SERVER}/backend/pkcs7/verify/detached", "fields": "document|pkcs7 (разделитель '|')" },
+        { "method": "POST", "url": "{E-IMZO-SERVER}/frontend/pkcs7/join", "fields": "два attached pkcs7 одного документа → мультиподпись (продавец+покупатель)" },
+        { "method": "POST", "url": "{E-IMZO-SERVER}/frontend/mobile/auth | /frontend/mobile/sign", "fields": "→ siteId, documentId, challange; фронт строит QR/Deeplink = siteId + documentId + GOST-хеш + CRC32; приложение E-IMZO ID-CARD (uz.yt.idcard.eimzo) отправляет PKCS#7 на /frontend/mobile/upload" },
+        { "method": "POST", "url": "{E-IMZO-SERVER}/frontend/mobile/status", "fields": "documentId → status (1 = подписано)" },
+        { "method": "GET/POST", "url": "{E-IMZO-SERVER}/backend/mobile/authenticate/{documentId} | /backend/mobile/verify", "fields": "серверная проверка мобильной подписи" }
+      ],
+      "notes": "SiteID выдаётся при регистрации ИС в 'ID-CARD E-IMZO MOBILE' и фиксирует UPLOAD URL. Схема deep link 'eimzo://' в официальном README НЕ указана — там описан Deeplink/QR с SiteID, DocumentID, хешем и CRC32; точный формат URI брать из примеров (JS/Dart/Java) в репозитории. Источник — репозиторий разработчика E-IMZO qo0p/e-imzo-doc (обновлён 2026-10-22).",
+      "docs_url": "https://github.com/qo0p/e-imzo-doc",
+      "verified": "partial"
+    },
+    {
+      "key": "didox",
+      "name": "Didox — ЭДО / ЭСФ / e-ТТН (Partner API)",
+      "purpose": "Создание, отправка и подпись (E-IMZO) электронных счетов-фактур (тип 002), ТТН (041), актов и договоров после исполнения биржевой сделки.",
+      "auth": "Заголовок Partner-Authorization: {partner_token} (выдаётся Didox партнёру) + user-key: {token пользователя}, получаемый логином юрлица по ИНН+паролю (/v1/auth/{taxId}/password/{locale}) или подписью ЭЦП.",
+      "sandbox": "По стороннему SDK: development → https://stage.goodsign.biz, production → https://api-partners.didox.uz. Официально не подтверждено.",
+      "endpoints": [
+        { "method": "POST", "url": "https://api-partners.didox.uz/v1/auth/{taxId}/password/{locale}", "fields": "password → token (user-key)" },
+        { "method": "POST", "url": "https://api-partners.didox.uz/v1/documents/{docType}/create", "fields": "JSON черновика документа (002 — ЭСФ, 041 — ТТН): контрагенты (ИНН), товары (ИКПУ/productClassCode, measureId, count, price)" },
+        { "method": "GET", "url": "https://api-partners.didox.uz/v2/documents", "fields": "список: limit, page, status, docType, dateFrom, dateTo" },
+        { "method": "GET", "url": "https://api-partners.didox.uz/v1/documents/{id}", "fields": "детали документа" },
+        { "method": "GET", "url": "https://api-partners.didox.uz/v1/utils/info/{taxId}", "fields": "данные контрагента по ИНН" }
+      ],
+      "notes": "Официальная страница api-partners.didox.uz при проверке отдала HTTP 500; эндпоинты извлечены из npm-пакета 'didox' v1.0.6 (сторонний, не Didox). Метод подписи (передача pkcs7 из E-IMZO) в SDK не найден — уточнить у Didox. Faktura.uz: по стороннему коннектору — REST api.faktura.uz, OAuth2 password grant через account.faktura.uz/token (client_id/secret из ЛК); официальных публичных доков нет (verified=false).",
+      "docs_url": "https://api-partners.didox.uz/",
+      "verified": "partial"
+    },
+    {
+      "key": "telegram_bot",
+      "name": "Telegram Bot API — уведомления и привязка аккаунта",
+      "purpose": "Пуш-уведомления о сделках, алертах цены, запросах агента на подтверждение; привязка Telegram к аккаунту биржи через deep link.",
+      "auth": "Токен бота от @BotFather в URL: https://api.telegram.org/bot{TOKEN}/{method}.",
+      "sandbox": "Есть тестовая среда Telegram (test DC), но для MVP достаточно отдельного dev-бота.",
+      "endpoints": [
+        { "method": "POST", "url": "https://api.telegram.org/bot{TOKEN}/sendMessage", "fields": "chat_id, text, parse_mode (HTML|MarkdownV2), reply_markup (inline_keyboard — кнопки «Подтвердить/Отклонить»)" },
+        { "method": "LINK", "url": "https://t.me/{bot_username}?start={payload}", "fields": "payload: A-Z a-z 0-9 _ -, до 64 символов (бинарное — base64url). Бот получает сообщение '/start {payload}'. Паттерн: генерируем одноразовый токен привязки → по /start сопоставляем chat_id с user_id." },
+        { "method": "POST", "url": "https://api.telegram.org/bot{TOKEN}/setWebhook", "fields": "url, secret_token (проверять заголовок X-Telegram-Bot-Api-Secret-Token)" }
+      ],
+      "notes": "Пользователь должен сам начать диалог — до /start бот писать не может. Одноразовый payload с TTL, чтобы ссылку нельзя было переиспользовать.",
+      "docs_url": "https://core.telegram.org/bots/features#deep-linking",
+      "verified": "true"
+    },
+    {
+      "key": "cbu_instant_payments",
+      "name": "ЦБ РУз — Система мгновенных платежей (СМП), открытый банкинг, нацсвитч",
+      "purpose": "Потенциальный канал прямых A2A-переводов со счёта на счёт (дешевле карточного эквайринга) и доступа к данным счетов через Open API.",
+      "auth": "Нет публичного API для финтехов на 2026-11. Доступ — только через банки/платёжные организации с лицензией ЦБ.",
+      "sandbox": "Нет публичного.",
+      "endpoints": [],
+      "notes": "По СМИ: указ от 27.11.2025 сделал ЦБ уполномоченным органом по финтеху (стратегия 2026–2030, Innovation Hub); поручено до 01.02.2026 дать физлицам прямые переводы в СМП со счетов и открыть P2P поставщикам платёжных услуг через OpenAPI; инфраструктура открытого банкинга планировалась к сентябрю 2026 (факт запуска не подтверждён); в октябре 2026 Минюст (23.10) зарегистрировал положение о розничных расчётах через национальный платёжный свитч; A2A-переводы уже технически доступны во всех банках. Для MVP — использовать Payme/Click/Uzum, СМП подключать через банк-партнёр. Источники: spot.uz/ru/2025/11/28/cb-paymetns/, spot.uz/ru/2026/03/28/a2a-payments/, spot.uz/ru/2026/10/29/switch-ordnance/, intellinews.com (fintech hub 2030), cbu.uz Annual report 2025.",
+      "docs_url": "https://cbu.uz/",
+      "verified": "false"
+    }
+  ]
+}

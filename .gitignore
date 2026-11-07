@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+app/data/state.sqlite*
+server.log
+.playwright-mcp/
+tests/selfie.*
+.DS_Store
