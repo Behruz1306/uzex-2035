@@ -133,17 +133,19 @@ function Outcome() {
   useEffect(() => { api("/api/insights/overview").then(setO); }, []);
   return html`<div class="grid" style="gap:14px">
     <div class="kpis">
-      <div class="kpi"><span>Новый оборот биржи</span><b class="mono agentc">+$225 млн</b><i class="tiny muted">в год, базовый сценарий +5%</i></div>
-      <div class="kpi"><span>Сборы UZEX</span><b class="mono">+$0,63 млн</b><i class="tiny muted">0,28% с нового оборота</i></div>
-      <div class="kpi"><span>Новых активных клиентов</span><b class="mono">+2 350</b><i class="tiny muted">к 2029 году</i></div>
+      <div class="kpi"><span>Рынок в зоне охвата</span><b class="mono agentc">$49 млрд</b><i class="tiny muted">в год: оборот UZEX ≈ $16 млрд + экспорт Узбекистана $33,4 млрд</i></div>
+      <div class="kpi"><span>Новый оборот через биржу</span><b class="mono">до +$1,1 млрд</b><i class="tiny muted">в год: +20% товарных торгов и экспорт через биржу до 1%</i></div>
+      <div class="kpi"><span>Компаний-клиентов</span><b class="mono">до 27 000</b><i class="tiny muted">13 500 участников торгов + 14 000 производителей вне биржи</i></div>
       <div class="kpi"><span>Покупателей на одного продавца</span><b class="mono">${o ? Math.round(o.buyers / o.sellers) : "—"}</b><i class="tiny muted">${o ? `${nf(o.buyers)} / ${o.sellers} в ${o.year}` : ""} — продавцов не хватает</i></div></div>
     <div class="grid three">
       <div class="card pad"><h3><${Icon} n="users" s=${16}/> Доступность</h3><p class="small" style="margin:0">Биржу находят из интернета; запрос одной фразой на любом языке; малый бизнес получает те же данные, что и крупный.</p></div>
       <div class="card pad"><h3><${Icon} n="market" s=${16}/> Прозрачность</h3><p class="small" style="margin:0">Цены, спрос по регионам и рейтинг надёжности продавцов открыты. Посредник больше не решает, кто с кем работает.</p></div>
       <div class="card pad"><h3><${Icon} n="shield" s=${16}/> Безопасность</h3><p class="small" style="margin:0">Деньги на клиринговом счёте, задатки, поручение с границами и PIN; чужие сделки — только в агрегатах.</p></div></div>
-    <div class="card pad"><h3>Рынок</h3><div class="kv"><span>TAM — аналитика и брокерские услуги при обороте UZEX ≈ $16 млрд</span><b class="mono">≈ $82 млн/год</b></div>
-      <div class="kv"><span>SAM — участники товарных торгов и производители вне биржи</span><b class="mono">≈ $15 млн/год</b></div>
-      <div class="kv"><span>SOM — к 2029 году</span><b class="mono">≈ $1,2 млн/год</b></div>
-      <p class="tiny muted" style="margin:8px 0 0">Источники: spot.uz, stat.uz, uzdaily.uz, тарифы UZEX с 01.10.2026; допущения помечены в расчёте.</p></div>
+    <div class="card pad"><h3>Рынок</h3>
+      <div class="kv"><span>TAM — оборот, который может идти через ИИ-брокера (биржа + экспорт)</span><b class="mono">≈ $49 млрд/год</b></div>
+      <div class="kv"><span>SAM — оборот всех площадок UZEX</span><b class="mono">≈ $16 млрд/год</b></div>
+      <div class="kv"><span>SOM — новый оборот через ИИ-брокера к 2029 году</span><b class="mono">≈ $1,1 млрд/год</b></div>
+      <div class="kv"><span>Потенциал выручки сервиса (подписка на аналитику + 0,1% со сделок)</span><b class="mono">до $82 млн/год</b></div>
+      <p class="tiny muted" style="margin:8px 0 0">Источники: spot.uz (оборот UZEX), gov.uz (экспорт 2025), stat.uz, реестр сделок UZEX; допущения помечены в расчёте.</p></div>
   </div>`;
 }
