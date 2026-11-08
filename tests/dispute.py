@@ -3,7 +3,7 @@ B = "http://localhost:8090"; c = httpx.Client(base_url=B, timeout=90)
 j = lambda r: r.json() if r.status_code < 400 else (_ for _ in ()).throw(SystemExit(f"{r.status_code} {r.text}"))
 r = j(c.post("/api/auth/start", json={"phone": "+998901234567"})); r = j(c.post("/api/auth/verify", json={"phone": "998901234567", "code": r["sandbox_sms"]}))
 H = {"Authorization": "Bearer " + r["token"]}; uid_ = r["user"]["id"]
-print(j(c.post("/api/ops/scenario", json={"scenario": sys.argv[1]})))
+print(j(c.post("/api/ops/scenario", json={"scenario": sys.argv[1]}, headers={"Authorization": "Bearer " + os.environ.get("OPS_KEY", "test-ops")})))
 db = sqlite3.connect("app/data/state.sqlite")
 price = j(c.get("/api/market/sugar"))["candles"][-1]["vwap"]
 mid = "M_d" + str(int(time.time()))

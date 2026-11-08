@@ -248,3 +248,25 @@ input[type=range]{accent-color:var(--agent);width:100%}
 .consent{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;color:var(--text2);margin:-2px 0 12px;cursor:pointer}
 .consent input{margin-top:3px;accent-color:var(--agent)}
 .choice button{color:var(--text)}
+
+/* ===== AI broker: markets, business, find ===== */
+.kpis .kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;min-width:0}
+.kpi>span{display:block;font-size:12.5px;color:var(--muted)} .kpi>b{font-size:23px;margin:2px 0} .kpi>i{font-style:normal;display:block}
+.kv b{text-align:right} .kv{padding:5px 0;border-bottom:1px solid var(--line)}
+.chips{display:flex;flex-wrap:wrap;gap:6px} button.chip{cursor:pointer} button.chip:hover{border-color:var(--agent)}
+.chip.on{border-color:var(--agent);color:var(--agent);background:var(--agent-soft)}
+.tbl-wrap{overflow-x:auto} .tbl tr.click{cursor:pointer} .tbl tr.click:hover td{background:var(--panel2)}
+.bar-row{display:flex;align-items:center;gap:8px;padding:5px 0}
+.bar-t{flex:1;height:8px;border-radius:4px;background:var(--panel2);overflow:hidden}.bar-t i{display:block;height:100%;background:var(--brand);border-radius:4px;max-width:100%}
+.score{width:74px;height:74px;border-radius:50%;border:3px solid var(--up);display:grid;place-content:center;text-align:center;flex:none}
+.score b{font-size:24px;line-height:1}.score span{color:var(--muted)}
+.mrow{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.share{text-align:right}.share b{display:block;font-size:22px;color:var(--agent)}
+.insight{display:flex;gap:10px;align-items:flex-start;margin-top:12px;padding:12px 14px;border-radius:var(--r2);background:var(--agent-soft);border:1px solid rgba(245,185,61,.35);font-size:14px}
+.insight svg{color:var(--agent);flex:none;margin-top:2px}
+.idea{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px;padding:10px 0;border-bottom:1px solid var(--line)} .idea:hover b{color:var(--agent)}
+.pub-top{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+.pub-top nav{display:flex;gap:4px;flex-wrap:wrap}.pub-top nav button{background:none;border:0;padding:6px 10px;border-radius:8px;color:var(--text2)}
+.pub-top nav button.on{color:var(--agent);background:var(--agent-soft)}
+.pub-page{max-width:1180px;margin:0 auto;padding:20px 16px 60px}
+@media (max-width:900px){.hide-m{display:none}.kpi>b{font-size:19px}.mrow{flex-wrap:wrap}}

@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import duckdb  # noqa: E402
-from fastapi import FastAPI, Header, HTTPException, Request  # noqa: E402
+from fastapi import Body, FastAPI, Header, HTTPException, Request  # noqa: E402
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
@@ -353,15 +353,20 @@ async def mandate_confirm(mid: str, req: Request, authorization: str = Header(No
     ins = INSTRUMENTS[m["instrument"]]
     if m["side"] == "sell" and u["status"] == "individual":
         raise HTTPException(403, "Продавать на бирже могут самозанятые, ИП и компании. Самозанятость оформляется за минуту")
+    # edits from the card are applied BEFORE the limit checks, so the checks see the final numbers
+    m = {**m, **{k: int(b[k]) for k in ("qty", "limit_price") if b.get(k)}}
+    if m["qty"] <= 0 or m["limit_price"] <= 0:
+        raise HTTPException(400, "Объём и цена должны быть больше нуля")
     if u["status"] == "individual" and m["side"] == "buy":
         if m["instrument"] in ("propane", "ai92"):
             raise HTTPException(403, "Физлицам дефицитные товары недоступны (защита от перекупщиков)")
-        if m["qty"] * m["limit_price"] > 50_000_000:
-            raise HTTPException(403, "Лимит для физлица — 50 млн сум в месяц. Оформите самозанятость за минуту")
+        month = q1("select coalesce(sum(qty * limit_price), 0) s from mandates where user_id=? and side='buy' and status!='draft' "
+                   "and status!='cancelled' and created_at>?", u["id"], now() - 30 * 86400)["s"]
+        if month + m["qty"] * m["limit_price"] > 50_000_000:
+            raise HTTPException(403, "Лимит для физлица — 50 млн сум в месяц (с учётом прошлых поручений). Оформите самозанятость за минуту")
     with tx() as c:
         for k in ("qty", "limit_price"):
-            if b.get(k):
-                c.execute(f"update mandates set {k}=? where id=?", (int(b[k]), mid))
+            c.execute(f"update mandates set {k}=? where id=?", (m[k], mid))
         m = q1("select * from mandates where id=?", mid)
         sig = docs.mandate_doc(c, u["id"], m)
         c.execute("update mandates set status='active', signature=? where id=?", (sig, mid))
@@ -631,8 +636,20 @@ def ops_integrity():
     return _integrity_cache
 
 
+def ops_guard(auth):
+    """Exchange-operator actions: an operator key (OPS_KEY) or, in the demo, a signed-in verified user."""
+    key = os.environ.get("OPS_KEY")
+    tok = (auth or "").replace("Bearer ", "").strip()
+    if key and tok == key:
+        return
+    u = user_from(auth)
+    if not u["verified_at"]:
+        raise HTTPException(403, "Действие доступно только сотруднику биржи")
+
+
 @app.post("/api/ops/scenario")
-async def ops_scenario(req: Request):
+async def ops_scenario(req: Request, authorization: str = Header(None)):
+    ops_guard(authorization)
     b = await req.json()
     s = b.get("scenario")
     if s not in ("normal", "short_loading", "transit_loss", "no_shipment"):
@@ -642,7 +659,8 @@ async def ops_scenario(req: Request):
 
 
 @app.post("/api/ops/disputes/{dsp}/approve")
-def ops_approve(dsp: str):
+def ops_approve(dsp: str, authorization: str = Header(None)):
+    ops_guard(authorization)
     r = arbitration.accept(dsp, "operator", operator=True)
     if r.get("error"):
         raise HTTPException(400, r["error"])
@@ -862,3 +880,234 @@ def ops_integrations():
                 {"item": "Допуск физлиц и самозанятых к торгам", "status": "regulatory",
                  "how": "Изменение Правил биржевой торговли (п.1, 4): прецеденты agro.uzex.uz и MOBILRAQAM"},
             ]}
+
+
+# ================================================================== AI broker: exchange data → business insights
+import html as _html  # noqa: E402
+
+import insights  # noqa: E402
+
+BASE = os.environ.get("PUBLIC_URL", "https://uzex-2035.fly.dev").rstrip("/")
+
+
+@app.get("/api/insights/overview")
+def ins_overview():
+    return insights.overview()
+
+
+@app.get("/api/insights/markets")
+def ins_markets():
+    return {"markets": insights.families(), "source": "Реестр сделок UZEX 2022–2026"}
+
+
+@app.get("/api/insights/market/{s}")
+def ins_market(s: str):
+    d = insights.family(s)
+    if not d:
+        raise HTTPException(404, "Товар не найден")
+    inst = next((k for k, v in INSTRUMENTS.items() if v.get("family") == d["name"]), None)
+    return {**d, "cheapest_months": insights.cheapest_months(d["name"]), "instrument": inst}
+
+
+@app.get("/api/insights/demos")
+def ins_demos():
+    return {"demos": insights.demos()}
+
+
+@app.get("/api/insights/company")
+def ins_company(inn: str = "", authorization: str = Header(None)):
+    inn = re.sub(r"\D", "", inn)
+    demo = {d["inn"] for d in insights.demos()}
+    if inn not in demo:
+        # a company sees only its own data (in production the INN is confirmed by the E-IMZO key of the director)
+        u = user_from(authorization)
+        if re.sub(r"\D", "", u["inn"] or "") != inn:
+            raise HTTPException(403, "Данные компании доступны только самой компании. Укажите свой ИНН в профиле")
+    return insights.company(inn)
+
+
+@app.post("/api/me/company")
+async def me_company(req: Request, authorization: str = Header(None)):
+    u = user_from(authorization)
+    b = await req.json()
+    inn = re.sub(r"\D", "", b.get("inn", ""))
+    if not re.fullmatch(r"\d{9}", inn):
+        raise HTTPException(400, "ИНН — 9 цифр")
+    c = insights.company(inn)
+    with tx() as cx:
+        cx.execute("update users set inn=?, company=coalesce(?, company) where id=?", (inn, c.get("name"), u["id"]))
+    return {"ok": True, "found": c.get("found"), "name": c.get("name"),
+            "note": "Песочница: в боевой версии ИНН подтверждается ключом E-IMZO руководителя"}
+
+
+# ------------------------------------------------------------------ request in one phrase (WhatsApp-style RFQ)
+RFQ_PROMPT = """Ты — ИИ-брокер Узбекской товарно-сырьевой биржи UZEX. Покупатель или продавец прислал запрос как в мессенджере
+(текст или скриншот, на любом языке). Разбери его и верни ТОЛЬКО JSON без пояснений:
+{"side": "buy"|"sell", "product": "что именно", "family": "одно название из списка или null", "qty": число или null,
+ "unit": "тонна|килограмм|литр|штука|куб.метр|кв.метр|метр", "destination": "город/страна или null", "deadline": "срок или null",
+ "budget": "бюджет/цена или null", "foreign": true|false, "lang": "ru"|"uz"|"en",
+ "reply": "2 коротких предложения на языке запроса: что ты понял; что ниже — цена последних сделок биржи, надёжные продавцы и стоимость с учётом сборов биржи (без доставки), а итоговую цену определят торги. Если чего-то не хватает (марка, упаковка, базис поставки) — один уточняющий вопрос. Не пиши, что цены нет, и не выдумывай цифры."}
+Список товаров биржи: """
+
+
+def _rfq_parse(text: str, image: str | None):
+    names = ", ".join(f["name"] for f in insights.families())
+    content = []
+    m = re.match(r"data:(image/\w+);base64,(.+)", image or "", re.S)
+    if m:
+        content.append({"type": "image", "source": {"type": "base64", "media_type": m.group(1), "data": m.group(2)}})
+    content.append({"type": "text", "text": (text or "(запрос на скриншоте)")[:2000]})
+    try:
+        r = agent.client().with_options(timeout=25, max_retries=1).messages.create(model=agent.MODEL, max_tokens=600, system=RFQ_PROMPT + names,
+                                           messages=[{"role": "user", "content": content}])
+        raw = "".join(getattr(x, "text", "") for x in r.content)
+        return json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
+    except Exception:
+        hit = insights.search(text or "")
+        qty = re.search(r"(\d[\d\s]*)\s*(т|тонн|tonna|ton)", text or "", re.I)
+        return {"side": "sell" if re.search(r"прода|sotam|sell", text or "", re.I) else "buy", "product": text[:60] if text else "",
+                "family": hit[0]["name"] if hit else None, "qty": int(re.sub(r"\D", "", qty.group(1))) if qty else None,
+                "unit": "тонна", "destination": None, "deadline": None, "budget": None, "foreign": False, "lang": "ru",
+                "reply": "Понял запрос. Ниже — что есть на бирже по этому товару."}
+
+
+@app.post("/api/rfq")
+def rfq(req: Request, b: dict = Body(...)):
+    # sync handler → runs in the thread pool, so a slow LLM call never blocks the trading engine or other users
+    if limited("rfq:" + (req.headers.get("fly-client-ip") or (req.client.host if req.client else "x")), 20, 3600):
+        raise HTTPException(429, "Слишком много запросов, попробуйте через час")
+    text, image = (b.get("text") or "").strip(), b.get("image")
+    if not text and not image:
+        raise HTTPException(400, "Напишите, что нужно, или приложите скриншот")
+    p = _rfq_parse(text, image)
+    fam = insights.by_slug(p.get("family") or "") or (insights.search((p.get("product") or "") + " " + text) or [None])[0]
+    if not fam:
+        return {"parsed": p, "found": False,
+                "reply": p.get("reply") or "Такого товара в торгах биржи пока нет.",
+                "next": "Оставьте запрос — ИИ-брокер сообщит, когда появится продавец."}
+    d = insights.family(fam["slug"])
+    qty = p.get("qty") or 0
+    unit_ok = (p.get("unit") or fam["unit"]) == fam["unit"]
+    est = None
+    if qty and fam["price"] and unit_ok:
+        goods = qty * fam["price"]
+        fee = goods * (0.0013 + 0.0005) if p.get("side") != "sell" else goods * (0.0005 + 0.0005)
+        est = {"goods": round(goods), "fees": round(fee), "deposit": round(goods * 0.10), "total": round(goods + fee),
+               "note": "Сборы UZEX с 01.10.2026: покупатель 0,13% + клиринг 0,05%; продавец 0,05% + 0,05%. Задаток 10% блокируется и засчитывается в оплату."}
+    return {"parsed": p, "found": True, "reply": p.get("reply"),
+            "market": {k: d[k] for k in ("name", "en", "slug", "unit", "price", "price_change", "growth", "sellers", "buyers",
+                                         "exec_rate", "top3_share", "volume_uzs")},
+            "sellers": d["top_sellers"][:3], "cheapest_months": insights.cheapest_months(fam["name"]), "estimate": est,
+            "guarantee": "Деньги покупателя блокируются на клиринговом счёте биржи; продавец вносит задаток. Банковские гарантии и письма о намерениях не нужны.",
+            "page": f"{BASE}/tovar/{fam['slug']}"}
+
+
+# ------------------------------------------------------------------ public, indexable storefront (what uzex.uz closes in robots.txt)
+def _fmt(n):
+    return f"{n:,.0f}".replace(",", " ") if n is not None else "—"
+
+
+UNIT_EN = {"тонна": "t", "килограмм": "kg", "литр": "l", "штука": "pc", "куб.метр": "m³", "кв.метр": "m²", "метр": "m"}
+PAGE_CSS = """*{box-sizing:border-box}body{margin:0;background:#0d1117;color:#e8e6e1;font:16px/1.55 'Onest',system-ui,sans-serif}
+a{color:#F5B93D}main{max-width:880px;margin:0 auto;padding:28px 16px 60px}header{display:flex;gap:10px;align-items:center;margin-bottom:28px}
+header b{font-size:15px}header span{color:#8b949e;font-size:13px}h1{font-size:30px;line-height:1.2;margin:0 0 6px}
+.sub{color:#8b949e;margin:0 0 22px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:18px 0}
+.k{background:#161b22;border:1px solid #262c36;border-radius:10px;padding:12px 14px}.k b{display:block;font:600 21px 'JetBrains Mono',monospace}
+.k span{color:#8b949e;font-size:13px}.cta{display:inline-block;background:#F5B93D;color:#111;font-weight:600;padding:13px 20px;border-radius:10px;text-decoration:none;margin:8px 8px 0 0}
+.cta.ghost{background:none;color:#F5B93D;border:1px solid #F5B93D}table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:8px 6px;border-bottom:1px solid #262c36;text-align:left}th{color:#8b949e;font-weight:500}.up{color:#3fb950}.down{color:#f85149}
+.note{color:#8b949e;font-size:13px;margin-top:26px}section{margin-top:30px}h2{font-size:19px;margin:0 0 10px}
+@media(max-width:520px){h1{font-size:24px}td:nth-child(4),th:nth-child(4){display:none}}"""
+
+
+def _page(title, desc, body, ld=None, path="/tovar"):
+    ld_tag = f'<script type="application/ld+json">{json.dumps(ld, ensure_ascii=False)}</script>' if ld else ""
+    return HTMLResponse(f"""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{_html.escape(title)}</title><meta name="description" content="{_html.escape(desc)}"><link rel="canonical" href="{BASE}{path}">
+<meta property="og:title" content="{_html.escape(title)}"><meta property="og:description" content="{_html.escape(desc)}"><meta property="og:type" content="product">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;600&family=JetBrains+Mono:wght@600&display=swap" rel="stylesheet">
+<style>{PAGE_CSS}</style>{ld_tag}</head><body><main><header><svg width="22" height="22" viewBox="0 0 32 32"><path d="M5 23l7-8 6 4 9-12" stroke="#F5B93D" stroke-width="3.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<div><b>UZEX · ИИ-брокер</b><br><span>Товары биржи с гарантией расчётов</span></div></header>{body}
+<p class="note">Данные: реестр сделок Узбекской республиканской товарно-сырьевой биржи (UZEX), 2022–2026. Обновляется после каждой торговой сессии.
+<a href="/tovar">Все товары</a> · <a href="/llms.txt">Для ИИ-ассистентов</a></p></main></body></html>""")
+
+
+@app.get("/tovar", response_class=HTMLResponse)
+def store_index():
+    rows_ = "".join(
+        f"<tr><td><a href='/tovar/{f['slug']}'>{_html.escape(f['name'])}</a><br><span style='color:#8b949e;font-size:12px'>{f['en']}</span></td>"
+        f"<td>{_fmt(f['price'])} сум/{f['unit']}</td><td class='{'up' if (f['growth'] or 0) >= 0 else 'down'}'>{'' if f['growth'] is None else ('+' if f['growth'] >= 0 else '') + str(f['growth']) + '%'}</td>"
+        f"<td>{f['sellers']}</td></tr>" for f in insights.families())
+    body = f"""<h1>Товары Узбекской товарной биржи: цены и продавцы</h1><p class="sub">Uzbekistan Commodity Exchange — prices, volumes and verified sellers. {len(insights.families())} товаров.</p>
+<table><tr><th>Товар</th><th>Цена</th><th>Рост за год</th><th>Продавцов</th></tr>{rows_}</table>"""
+    ld = {"@context": "https://schema.org", "@type": "ItemList", "name": "Товары UZEX",
+          "itemListElement": [{"@type": "ListItem", "position": i + 1, "url": f"{BASE}/tovar/{f['slug']}", "name": f["name"]}
+                              for i, f in enumerate(insights.families())]}
+    return _page("Товары UZEX: цены, объёмы и продавцы — купить с гарантией биржи", "Цены и продавцы по 41 товару Узбекской товарно-сырьевой биржи. Купить оптом с гарантией расчётов.", body, ld)
+
+
+@app.get("/tovar/{s}", response_class=HTMLResponse)
+def store_page(s: str):
+    d = insights.family(s)
+    if not d:
+        raise HTTPException(404, "Товар не найден")
+    ue = UNIT_EN.get(d["unit"], d["unit"])
+    months = ", ".join(m["month"] for m in insights.cheapest_months(d["name"]))
+    sell = "".join(f"<tr><td>{_html.escape(x['name'])}</td><td>{x['exec_rate']}%</td><td>{x['on_time']}%</td><td>{x['deals']}</td></tr>" for x in d["top_sellers"][:6])
+    regs = ", ".join(f"{r['region']} {r['share']}%" for r in d["regions"][:4])
+    g = d["growth"]
+    title = f"{d['name']} оптом — цена {_fmt(d['price'])} сум/{d['unit']} | UZEX"
+    desc = f"{d['name']} ({d['en']}) на Узбекской товарной бирже: {_fmt(d['price'])} сум за {d['unit']}, {d['sellers']} продавцов, " \
+           f"исполнено {d['exec_rate']}% сделок. Купить с гарантией расчётов биржи."
+    body = f"""<h1>{_html.escape(d['name'])} оптом на бирже UZEX</h1>
+<p class="sub">{d['en']} — wholesale from Uzbekistan via the commodity exchange · {_html.escape(d['category'])}</p>
+<div class="grid"><div class="k"><b>{_fmt(d['price'])}</b><span>сум за {d['unit']}, медиана последних сделок</span></div>
+<div class="k"><b>{d['sellers']}</b><span>продавцов на бирже</span></div>
+<div class="k"><b class="{'up' if (g or 0) >= 0 else 'down'}">{'' if g is None else ('+' if g >= 0 else '') + str(g) + '%'}</b><span>оборот за год</span></div>
+<div class="k"><b>{d['exec_rate']}%</b><span>сделок исполнено</span></div></div>
+<a class="cta" href="/#/find?q={_html.escape(d['name'])}">Запросить через ИИ-брокера</a><a class="cta ghost" href="/#/markets/{d['slug']}">Аналитика рынка</a>
+<section><h2>Почему через биржу</h2><p>Деньги покупателя блокируются на клиринговом счёте биржи до отгрузки, продавец вносит задаток.
+Банковские гарантии, предоплата «на доверии» и письма о намерениях не нужны. Цена — прозрачная, по итогам торгов.<br>
+<span style="color:#8b949e">The exchange guarantees settlement: buyer funds are blocked in clearing, the seller posts a deposit. No bank guarantees or letters of intent needed.</span></p></section>
+<section><h2>Когда выгоднее покупать</h2><p>Исторически дешевле всего: {months or '—'}. Основной спрос: {regs or '—'}.</p></section>
+<section><h2>Надёжность продавцов</h2><table><tr><th>Продавец</th><th>Исполнено</th><th>В срок</th><th>Сделок</th></tr>{sell}</table></section>"""
+    prices = [m["price"] for m in d["monthly"][-3:] if m["price"]]
+    ld = {"@context": "https://schema.org", "@type": "Product", "name": d["name"], "alternateName": d["en"], "category": d["category"],
+          "description": desc, "url": f"{BASE}/tovar/{d['slug']}",
+          "brand": {"@type": "Organization", "name": "Uzbek Republican Commodity Exchange (UZEX)"},
+          "offers": {"@type": "AggregateOffer", "priceCurrency": "UZS", "lowPrice": min(prices) if prices else d["price"],
+                     "highPrice": max(prices) if prices else d["price"], "offerCount": d["sellers"],
+                     "availability": "https://schema.org/InStock", "areaServed": "UZ",
+                     "priceSpecification": {"@type": "UnitPriceSpecification", "price": d["price"], "priceCurrency": "UZS", "unitText": ue}}}
+    return _page(title, desc, body, ld, f"/tovar/{d['slug']}")
+
+
+@app.get("/robots.txt", response_class=HTMLResponse)
+def robots():
+    return HTMLResponse(f"User-agent: *\nAllow: /tovar\nAllow: /llms.txt\nDisallow: /api/\nSitemap: {BASE}/sitemap.xml\n", media_type="text/plain")
+
+
+@app.get("/sitemap.xml")
+def sitemap():
+    urls = [f"{BASE}/tovar"] + [f"{BASE}/tovar/{f['slug']}" for f in insights.families()]
+    xml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + \
+          "".join(f"<url><loc>{u}</loc><changefreq>daily</changefreq></url>" for u in urls) + "</urlset>"
+    return HTMLResponse(xml, media_type="application/xml")
+
+
+@app.get("/llms.txt", response_class=HTMLResponse)
+def llms():
+    lines = [f"# UZEX — Uzbek Republican Commodity Exchange: AI broker", "",
+             "> Wholesale commodities from Uzbekistan with exchange-guaranteed settlement. Machine-readable catalog for AI agents.", "",
+             f"- Catalog JSON: {BASE}/api/public/catalog", f"- Ask the AI broker (POST JSON {{\"text\": \"...\"}}): {BASE}/api/rfq", "", "## Products"]
+    lines += [f"- [{f['en']} / {f['name']}]({BASE}/tovar/{f['slug']}): {_fmt(f['price'])} UZS/{UNIT_EN.get(f['unit'], f['unit'])}, "
+              f"{f['sellers']} sellers, {f['exec_rate']}% deals executed" for f in insights.families()]
+    return HTMLResponse("\n".join(lines), media_type="text/plain; charset=utf-8")
+
+
+@app.get("/api/public/catalog")
+def catalog():
+    return {"exchange": "UZEX", "currency": "UZS", "updated": "after each trading session", "rfq": f"{BASE}/api/rfq",
+            "products": [{"name": f["name"], "name_en": f["en"], "url": f"{BASE}/tovar/{f['slug']}", "unit": f["unit"],
+                          "price": f["price"], "sellers": f["sellers"], "exec_rate_pct": f["exec_rate"], "growth_pct": f["growth"]}
+                         for f in insights.families()]}

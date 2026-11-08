@@ -1,5 +1,6 @@
 """Personal AI agent: understands intent, explains the market, drafts mandates, remembers the user."""
 import json
+from datetime import datetime
 import os
 import re
 import threading
@@ -7,6 +8,9 @@ import time
 
 import anthropic
 import duckdb
+import re
+
+import insights
 
 import arbitration
 import market
@@ -202,7 +206,41 @@ def t_lock_quote(user, instrument, qty, weeks=4):
             "status": "котировка — пользователь фиксирует цену PIN-кодом в карточке"}
 
 
+def _slim_family(d):
+    return {k: d.get(k) for k in ("name", "unit", "price", "price_change", "growth", "growth_ytd", "volume_uzs", "buyers", "sellers",
+                                  "sellers_prev", "top3_share", "exec_rate", "buyer_size", "new_buyers")} | {
+        "regions": d.get("regions", [])[:6], "top_sellers": [{k: x[k] for k in ("name", "score", "exec_rate", "on_time", "share")} for x in d.get("top_sellers", [])[:5]],
+        "cheapest_months": insights.cheapest_months(d["name"]), "price_note": "медиана цен сделок реестра, сум за единицу"}
+
+
+def t_market_insights(user, product):
+    f = insights.by_slug(product) or (insights.search(product) or [None])[0]
+    if not f:
+        return {"error": "товар не найден в реестре", "available": [x["name"] for x in insights.families()]}
+    return _slim_family(insights.family(f["slug"]))
+
+
+def t_markets_overview(user):
+    o = insights.overview()
+    return {k: o[k] for k in ("year", "deals", "buyers", "sellers", "sellers_by_year", "exec_rate", "small_buyers")} | {
+        "rising": [{k: f[k] for k in ("name", "growth", "sellers", "top3_share")} for f in o["rising"]],
+        "all": [{k: f[k] for k in ("name", "growth", "sellers", "volume_uzs")} for f in insights.families()]}
+
+
+def t_my_business(user):
+    inn = re.sub(r"\D", "", user.get("inn") or "")
+    if not inn:
+        return {"error": "ИНН компании не указан. Попроси пользователя указать его в разделе «Мой бизнес»."}
+    return insights.company(inn)
+
+
 TOOLS = [
+    ("market_insights", t_market_insights, "Данные биржи по любому из 41 товара (реестр сделок 2022–2026): оборот и рост, цена сделок, "
+     "сколько покупателей и продавцов, концентрация (доля топ-3), спрос по регионам, рейтинг надёжности продавцов, когда дешевле. "
+     "Используй, чтобы дать ценность сверх подачи заявки.", {"product": {"type": "string", "description": "название товара, например «мука», «селитра»"}}, ["product"]),
+    ("markets_overview", t_markets_overview, "Обзор всех рынков биржи: какие растут, где мало продавцов, сколько участников.", {}, []),
+    ("my_business", t_my_business, "Кабинет компании пользователя по её ИНН: доля рынка и место среди продавцов, динамика, регионы "
+     "с большим спросом, где компания не продаёт, идеи «куда расти» (что ещё покупают её покупатели), закупки с переплатой к рынку, рейтинг.", {}, []),
     ("market", t_market, "Текущие цены, изменение за 4 недели, минимальный лот и ближайшая торговая сессия.",
      {"instrument": {"type": "string", "enum": list(INSTRUMENTS)}}, []),
     ("recommend", t_recommend, "Прогноз и рекомендация «покупать сейчас или ждать» с объяснением и точностью модели.",
@@ -258,13 +296,16 @@ def profile_text(user) -> str:
     mem = q("select kind, text from memory where user_id=? order by id desc limit 25", user["id"])
     hist = q("select instrument, count(*) n, sum(qty) t, avg(limit_price) p from mandates where user_id=? and status!='draft' "
              "group by 1", user["id"])
-    return json.dumps({"agent_name": a.get("name"), "user": {k: user.get(k) for k in ("name", "status", "company", "region", "lang")},
+    return json.dumps({"agent_name": a.get("name"), "user": {k: user.get(k) for k in ("name", "status", "company", "inn", "region", "lang")},
                        "onboarding": prof, "memories": mem, "mandate_history": hist}, ensure_ascii=False)
 
 
-SYSTEM = """Ты — {agent_name}, личный ИИ-агент пользователя на бирже UZEX 2035. В этой модели люди не торгуют сами и не ищут
-брокеров: человек говорит, что ему нужно и какие у него границы, а ты превращаешь это в мандат, следишь за рынком,
-торгуешься на аукционах, ведёшь сделку до приёмки товара и защищаешь интересы пользователя в спорах.
+SYSTEM = """Ты — {agent_name}, ИИ-брокер биржи UZEX для этого клиента. Ты не просто подаёшь заявки: ты знаешь данные биржи
+за годы торгов и помогаешь бизнесу расти — показываешь долю рынка, где спрос, кому ещё продавать, что добавить в ассортимент,
+когда выгоднее покупать и у кого надёжнее. Сделки ведёшь через брокерскую контору клиента: превращаешь просьбу в поручение
+с границами, следишь за торгами, оплатой, отгрузкой и приёмкой, защищаешь интересы клиента в спорах.
+Главный вопрос клиента: «зачем мне ИИ-брокер, если заявку я подам сам?» — отвечай делом: каждый совет подкрепляй цифрами
+из market_insights, markets_overview, my_business.
 
 Профиль и память о пользователе (используй, подстраивайся под него; узнал новое — вызови remember):
 {profile}
@@ -288,8 +329,9 @@ SYSTEM = """Ты — {agent_name}, личный ИИ-агент пользова
 (tasnif.soliq.uz).
 
 ПРАВИЛА:
-1. Отвечай на языке пользователя (узбекский латиница/кириллица или русский), просто и коротко, как опытный брокер
-   объясняет другу. Без жаргона; если нужен термин — объясни в скобках.
+1. Отвечай на языке пользователя (узбекский латиница/кириллица, русский, английский), просто и КОРОТКО: 3–6 строк,
+   как опытный брокер объясняет другу. Сначала вывод, потом 2–3 цифры. Без жаргона («мандат» = «поручение»).
+   Дата сегодня указана в сообщении пользователя в квадратных скобках — используй её.
 2. Все цифры — только из инструментов. Не выдумывай. Если данных нет — скажи.
 3. Прогноз — это рекомендация, не указание. Всегда говори уверенность и точность модели; решение за человеком.
 4. Когда пользователь хочет купить: уточни недостающее (товар, объём, лимит цены, срок) одним вопросом, если без
@@ -297,7 +339,9 @@ SYSTEM = """Ты — {agent_name}, личный ИИ-агент пользова
    propose_mandate. Скажи, что нужно подтвердить мандат PIN-кодом в карточке.
 5. Перед советом о покупке посмотри recommend и calendar. Если скоро сессия по нужному товару — скажи когда.
 6. Юридические вопросы — через legal_help; ссылайся на нормы и реальные дела, без выдумок.
-7. Формат: 1–4 коротких абзаца или пункта, суммы с пробелами между тысячами, «сум/т». Не пиши текст перед вызовом
+7. План роста или «что мне делать»: вызови my_business, затем market_insights по 1–2 идеям; дай 3 конкретных шага
+   с цифрами (регион, товар, месяц). Данные других компаний раскрывай только обобщённо, кроме рейтинга продавцов.
+8. Формат: 1–4 коротких абзаца или пункта, суммы с пробелами между тысячами, «сум/т». Не пиши текст перед вызовом
    инструментов.
 """
 
@@ -306,7 +350,7 @@ def run(user, message, ui_lang="ru"):
     """Generator of SSE events for one user turn."""
     hist = q("select role, content from chat where user_id=? order by id desc limit 10", user["id"])[::-1]
     messages = [{"role": h["role"], "content": h["content"]} for h in hist]
-    messages.append({"role": "user", "content": f"[ui:{ui_lang}] {message}"})
+    messages.append({"role": "user", "content": f"[ui:{ui_lang}] [сегодня {datetime.now().strftime('%d.%m.%Y %H:%M')}] {message}"})
     a = q1("select name from agents where user_id=?", user["id"]) or {"name": "Agent"}
     system = [{"type": "text", "text": SYSTEM.format(agent_name=a["name"], profile=profile_text(user),
                                                      instruments=", ".join(f"{k} = {v['name_ru']} (лот {v['lot']} т)"

@@ -6,16 +6,29 @@ import { DealsScreen } from "./deals.js";
 import { WalletScreen, ProfileScreen, OpsScreen } from "./screens.js";
 import { HomeScreen } from "./home.js";
 import { LegalScreen } from "./legal.js";
+import { FindScreen, MarketsScreen, BusinessScreen } from "./insights.js";
 
 function useRoute() {
-  const [r, setR] = useState(location.hash.slice(1) || "/home");
-  useEffect(() => { const f = () => setR(location.hash.slice(1) || "/home"); addEventListener("hashchange", f); return () => removeEventListener("hashchange", f); }, []);
+  const [r, setR] = useState(location.hash.slice(1) || "/business");
+  useEffect(() => { const f = () => setR(location.hash.slice(1) || "/business"); addEventListener("hashchange", f); return () => removeEventListener("hashchange", f); }, []);
   return r.split("/").filter(Boolean);
 }
 
-const NAV = [["home", "home", "Главная"], ["agent", "agent", "Агент"], ["market", "market", "Рынок"], ["deals", "deals", "Сделки"],
-  ["legal", "law", "Юрист"], ["wallet", "wallet", "Кошелёк"], ["profile", "profile", "Мой агент"], ["ops", "ops", "Пульт биржи"]];
-const TABS = ["home", "agent", "market", "deals", "profile"];
+const NAV = [["business", "home", "Мой бизнес"], ["markets", "market", "Рынки"], ["find", "spark", "Найти товар"], ["agent", "agent", "ИИ-брокер"],
+  ["market", "calendar", "Торги"], ["deals", "deals", "Сделки"], ["wallet", "wallet", "Кошелёк"], ["profile", "profile", "Профиль"]];
+const MORE = [["home", "home", "Сводка агента"], ["legal", "law", "Юрист"], ["ops", "ops", "Пульт биржи"]];
+const TABS = ["business", "markets", "find", "agent", "deals"];
+const PUBLIC = [["find", "Найти товар"], ["markets", "Рынки"], ["business", "Мой бизнес"]];
+
+function PublicShell({ page, arg }) {
+  const P = { find: FindScreen, markets: MarketsScreen, business: BusinessScreen }[page] || FindScreen;
+  return html`<div><header class="pub-top">
+      <div class="brand" style="padding:0"><div class="mk"><svg width="18" height="18" viewBox="0 0 32 32"><path d="M5 23l7-8 6 4 9-12" stroke="#F5B93D" stroke-width="3.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div><b>UZEX</b><span>ИИ-брокер биржи</span></div></div>
+      <nav>${PUBLIC.map(([k, l]) => html`<button class=${page === k ? "on" : ""} onClick=${() => go("/" + k)}>${l}</button>`)}</nav>
+      <span class="sp"/><button class="btn sm" onClick=${() => go("/start")}>Войти / Начать</button></header>
+    <main class="pub-page"><${P} arg=${arg}/></main><${Toasts}/></div>`;
+}
 
 function Tape() {
   const s = useStore();
@@ -33,13 +46,15 @@ function Toasts() {
 function Shell() {
   const s = useStore();
   const [page, arg] = useRoute();
-  const P = { home: HomeScreen, agent: AgentScreen, market: MarketScreen, deals: DealsScreen, legal: LegalScreen, wallet: WalletScreen, profile: ProfileScreen, ops: OpsScreen }[page] || HomeScreen;
-  const props = page === "market" ? { key_: arg } : page === "deals" ? { id: arg } : {};
+  const [pg, qs] = (page || "business").split("?");
+  const P = { home: HomeScreen, agent: AgentScreen, market: MarketScreen, deals: DealsScreen, legal: LegalScreen, wallet: WalletScreen, profile: ProfileScreen, ops: OpsScreen,
+    find: FindScreen, markets: MarketsScreen, business: BusinessScreen }[pg] || BusinessScreen;
+  const props = pg === "market" ? { key_: arg } : pg === "deals" ? { id: arg } : pg === "find" ? { arg: qs } : pg === "markets" ? { arg } : {};
   return html`<div class="shell">
     <aside class="side">
       <div class="brand"><div class="mk"><svg width="18" height="18" viewBox="0 0 32 32"><path d="M5 23l7-8 6 4 9-12" stroke="#F5B93D" stroke-width="3.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-        <div><b>UZEX 2035</b><span>биржа агентов</span></div></div>
-      <nav class="nav">${NAV.map(([k, ic, l]) => html`<button class=${page === k || (!page && k === "home") ? "on" : ""} onClick=${() => location.hash = "#/" + k}><${Icon} n=${ic}/>${tr(l)}
+        <div><b>UZEX</b><span>ИИ-брокер биржи</span></div></div>
+      <nav class="nav">${[...NAV, ...MORE].map(([k, ic, l], i) => html`${i === NAV.length ? html`<div class="tiny muted" style="padding:14px 10px 4px">Ещё</div>` : ""}<button class=${pg === k ? "on" : ""} onClick=${() => location.hash = "#/" + k}><${Icon} n=${ic}/>${tr(l)}
         ${k === "agent" && s.unread > 0 ? html`<span class="badge">${s.unread}</span>` : ""}</button>`)}</nav>
       <div class="foot">Агент: <b style="color:var(--text)">${s.me?.agent?.name}</b><br/>${s.me?.name}<br/>
         <button class="btn ghost sm" style="padding:4px 0;margin-top:6px" onClick=${() => { setToken(null); location.hash = ""; location.reload(); }}>Выйти</button></div>
@@ -52,19 +67,22 @@ function Shell() {
       </header>
       <main class="page"><${P} ...${props}/></main>
     </div>
-    <nav class="tabbar">${NAV.filter(x => TABS.includes(x[0])).map(([k, ic, l]) => html`<button class=${page === k ? "on" : ""} onClick=${() => location.hash = "#/" + k}><${Icon} n=${ic} s=${21}/>${tr(l)}${k === "agent" && s.unread > 0 ? html`<span class="badge">${s.unread}</span>` : ""}</button>`)}</nav>
+    <nav class="tabbar">${NAV.filter(x => TABS.includes(x[0])).map(([k, ic, l]) => html`<button class=${pg === k ? "on" : ""} onClick=${() => location.hash = "#/" + k}><${Icon} n=${ic} s=${21}/>${tr(l)}${k === "agent" && s.unread > 0 ? html`<span class="badge">${s.unread}</span>` : ""}</button>`)}</nav>
     <${Toasts}/>
   </div>`;
 }
 
 function App() {
   const s = useStore();
+  useRoute();
   const [ready, setReady] = useState(false);
   useEffect(() => { (async () => { if (s.token) { try { await refreshMe(); } catch (e) {} } setReady(true); })(); }, []);
   useEffect(() => { if (s.me?.agent) connectStream(); }, [s.me?.agent]);
   if (!ready) return html`<div class="empty" style="padding-top:30vh"><span class="spin"/></div>`;
-  if (location.hash.startsWith("#/ops") && !s.token) return html`<div class="page"><${OpsScreen}/><${Toasts}/></div>`;
-  if (!s.token || !s.me?.agent || s.onboarding) return html`<${Onboarding} onDone=${async () => { set({ onboarding: false }); await refreshMe(); location.hash = "#/home"; connectStream(); }}/>`;
+  const [pp, pa] = location.hash.slice(2).split("/");
+  const pubPage = (pp || "").split("?")[0];
+  if (!s.token && ["find", "markets", "business"].includes(pubPage)) return html`<${PublicShell} page=${pubPage} arg=${pubPage === "find" ? (pp.split("?")[1] || "") : pa}/>`;
+  if (!s.token || !s.me?.agent || s.onboarding) return html`<${Onboarding} onDone=${async () => { set({ onboarding: false }); await refreshMe(); location.hash = store.pendingAsk ? "#/agent" : "#/business"; connectStream(); }}/>`;
   return html`<${Shell}/>`;
 }
 
