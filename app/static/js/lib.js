@@ -182,8 +182,8 @@ const UZ = {
   "Ваш личный агент": "Shaxsiy agentingiz", "Создать агента": "Agentni yaratish", "Пополните кошелёк": "Hamyonni to‘ldiring",
   "Позже": "Keyinroq", "Перейти к агенту": "Agentga o‘tish",
   "реальная котировка UZEX": "ta real UZEX kotirovkasi", "сделок реестра": "ta reyestr bitimi", "реальных судебных дела": "ta real sud ishi",
-  "Это песочница UZEX 2035: государственные сервисы (SMS, MyID, оплата картой) имитируются, но весь процесс — торги, клиринг, подписи, документы, споры — работает по-настоящему.":
-    "Bu UZEX 2035 qum qutisi: davlat xizmatlari (SMS, MyID, karta orqali to‘lov) imitatsiya qilinadi, lekin butun jarayon — savdo, kliring, imzolar, hujjatlar, nizolar — haqiqatda ishlaydi.",
+  "Это рабочий прототип: государственные сервисы (SMS, MyID, оплата картой) имитируются, но весь процесс — торги, клиринг, подписи, документы, споры — работает по-настоящему.":
+    "Bu ishlaydigan prototip: davlat xizmatlari (SMS, MyID, karta orqali to‘lov) imitatsiya qilinadi, lekin butun jarayon — savdo, kliring, imzolar, hujjatlar, nizolar — haqiqatda ishlaydi.",
   "Согласен на обработку персональных данных (Закон РУз «О персональных данных», ЗРУ-547) и с правилами платформы":
     "Shaxsga doir ma’lumotlarni qayta ishlashga (O‘zR «Shaxsga doir ma’lumotlar to‘g‘risida»gi Qonuni) va platforma qoidalariga roziman",
 
