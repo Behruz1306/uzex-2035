@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 import duckdb
 from pathlib import Path
 
+import os
 from core import DATA, HISTORY_DB, INSTRUMENTS, q
 
 _hist = {}
@@ -92,9 +93,13 @@ def load_history():
         return _hist
 
 
+# sessions before this unix time are ignored for prices (lets ops reset the simulated tape without wiping user data)
+EPOCH = float(os.environ.get("MARKET_EPOCH", "0"))
+
+
 def last_price(key: str) -> int:
     live = q("select clearing_price from sessions where instrument=? and status='cleared' and clearing_price>0 "
-             "order by closes_at desc limit 1", key)
+             "and closes_at>=? order by closes_at desc limit 1", key, EPOCH)
     if live:
         return live[0]["clearing_price"]
     return load_history()[key]["candles"][-1]["vwap"]
@@ -104,7 +109,7 @@ def candles(key: str) -> list:
     """History candles + live session results folded into weekly candles."""
     out = [dict(c) for c in load_history()[key]["candles"]]
     live = q("select closes_at, clearing_price, matched from sessions where instrument=? and status='cleared' "
-             "and clearing_price>0 order by closes_at", key)
+             "and clearing_price>0 and closes_at>=? order by closes_at", key, EPOCH)
     for s in live:
         d = datetime.fromtimestamp(s["closes_at"]).date()
         wk = (d - timedelta(days=d.weekday())).isoformat()

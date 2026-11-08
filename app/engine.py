@@ -86,6 +86,12 @@ def _seller_for(key, n):
 # ------------------------------------------------------------------ scheduling, announcements, alerts
 def ensure_schedule():
     t = now()
+    # keep queued sessions inside the real-quote band (repairs any tape that drifted before mean reversion)
+    for s in q("select id, instrument, start_price from sessions where status='scheduled'"):
+        a = market.load_history()[s["instrument"]]["candles"][-1]["vwap"]
+        if not a * 0.92 <= s["start_price"] <= a * 1.08:
+            with tx() as c:
+                c.execute("update sessions set start_price=? where id=?", (int(round(a * random.uniform(0.975, 1.005), -3)), s["id"]))
     for i, key in enumerate(INSTRUMENTS):
         last = q1("select opens_at from sessions where instrument=? order by opens_at desc limit 1", key)
         nxt = (last["opens_at"] + EVERY) if last else (t + 20 + i * EVERY / len(INSTRUMENTS))
@@ -93,8 +99,11 @@ def ensure_schedule():
             n = q1("select count(*) n from sessions where instrument=?", key)["n"]
             seller = _seller_for(key, n)
             ins = INSTRUMENTS[key]
-            price = market.last_price(key)
-            start = int(round(price * random.uniform(0.965, 0.995), -3))
+            # mean-revert to the real UZEX quote so the simulated market never drifts away from reality
+            anchor = market.load_history()[key]["candles"][-1]["vwap"]
+            ref = 0.6 * anchor + 0.4 * market.last_price(key)
+            ref = min(max(ref, anchor * 0.94), anchor * 1.06)
+            start = int(round(ref * random.uniform(0.975, 1.005), -3))
             offered = ins["lot"] * random.randint(6, 14)
             sid = f"S{key[:3].upper()}{int(nxt)}"
             with tx() as c:

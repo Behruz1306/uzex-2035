@@ -2,6 +2,7 @@ app = "uzex-2035"
 primary_region = "fra"
 
 [env]
+  MARKET_EPOCH = "1794100112"
   TZ = "UZT-5"
   SESSION_EVERY = "90"
   SESSION_OPEN = "25"
