@@ -96,6 +96,10 @@ def families() -> list:
       with t as (select product_family f, seller_inn, sum(amount_uzs) s from v_deals where year = {LAST_FULL} group by 1, 2),
       r as (select f, s, row_number() over (partition by f order by s desc) rk, sum(s) over (partition by f) tot from t)
       select f, sum(s) / any_value(tot) s from r where rk <= 3 group by 1""")}
+    spark = {}
+    for r in rows("""select product_family f, strftime(date_trunc('month', deal_date), '%Y-%m') m, sum(amount_uzs) v from v_deals
+                     where deal_date >= date '2025-07-01' group by 1, 2 order by 1, 2"""):
+        spark.setdefault(r["f"], []).append(round(r["v"]))
     out = []
     for r in base:
         if not r["vol"]:
@@ -107,7 +111,7 @@ def families() -> list:
                     "growth": growth(r["vol"], r["vol_prev"]), "growth_ytd": growth(r["ytd"], r["ytd_prev"]),
                     "top3_share": round(top.get(r["f"], 0) * 100, 1), "exec_rate": round((r["exec_rate"] or 0) * 100, 1),
                     "price": round(r["price"]) if r["price"] else None,
-                    "price_change": growth(r["price"], r["price_ly"])})
+                    "price_change": growth(r["price"], r["price_ly"]), "spark": spark.get(r["f"], [])[-16:]})
     out.sort(key=lambda x: -x["volume_uzs"])
     return out
 

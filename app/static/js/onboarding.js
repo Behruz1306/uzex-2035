@@ -20,9 +20,10 @@ function Hero() {
     <h1>${tr("ИИ-брокер биржи: найдёт рынок, покажет спрос и проведёт сделку")}</h1>
     <p>${tr("Данные UZEX за годы торгов превращаются в подсказки для вашего бизнеса. Сделка — с гарантией биржи.")}</p>
     <div class="row" style="flex-wrap:wrap;gap:8px;margin:4px 0 18px">
-      <button class="btn pri" onClick=${() => { location.hash = "#/find"; }}><${Icon} n="spark" s=${16}/> ${tr("Найти товар — без регистрации")}</button>
+      <button class="btn pri" onClick=${() => { location.hash = "#/demo"; }}><${Icon} n="spark" s=${16}/> ${tr("Демо за 2 минуты")}</button>
+      <button class="btn ghost" onClick=${() => { location.hash = "#/find"; }}>${tr("Найти товар")}</button>
       <button class="btn ghost" onClick=${() => { location.hash = "#/markets"; }}>${tr("Смотреть рынки")}</button>
-      <button class="btn ghost" onClick=${() => { location.hash = "#/business"; }}>${tr("Пример кабинета")}</button></div>
+</div>
     <div class="ob-points">${pts.map(([b, s]) => html`<div><${Icon} n="check" s=${20}/><span><b>${tr(b)}</b> ${tr(s)}</span></div>`)}</div>
     <div class="ob-proof"><span><b>500 000</b> ${tr("сделок биржи")}</span><span><b>41</b> ${tr("товар с аналитикой")}</span><span><b>1 461</b> ${tr("реальных котировок UZEX")}</span></div>
   </div>`;

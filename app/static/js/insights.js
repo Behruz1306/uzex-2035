@@ -1,4 +1,4 @@
-import { html, useState, useEffect, useRef, api, store, set, useStore, nf, sum, short, Icon, go, tr } from "./lib.js";
+import { html, useState, useEffect, useRef, api, store, set, useStore, nf, sum, short, Icon, Spark, go, tr } from "./lib.js";
 
 const sgn = v => v === null || v === undefined ? "—" : (v > 0 ? "+" : "") + nf(v, 1) + "%";
 const cls = v => v === null || v === undefined ? "muted" : v >= 0 ? "up" : "down";
@@ -14,7 +14,7 @@ const Src = () => html`<p class="tiny muted" style="margin:6px 0 0">Источн
 const EXAMPLES = ["Нужно 30 тонн цемента в Самарканд до пятницы", "Malayziyaga 500 tonna selitra kerak, dekabrgacha",
   "Need 2,000 t of urea delivered to Afghanistan, price?", "Хочу продать 40 тонн муки, кому и почём?"];
 
-export function FindScreen({ arg }) {
+export function FindScreen({ arg, auto }) {
   const q0 = decodeURIComponent((arg || "").split("q=")[1] || "");
   const [text, setText] = useState(q0 ? `Нужно купить: ${q0}` : "");
   const [img, setImg] = useState(null);
@@ -27,6 +27,7 @@ export function FindScreen({ arg }) {
     try { setRes(await api("/api/rfq", { method: "POST", body: { text: t, image: img } })); } catch (e) { setErr(e.message); }
     setBusy(false);
   };
+  useEffect(() => { if (auto) { setText(auto); send(auto); } }, [auto]);
   const pick = e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => setImg(r.result); r.readAsDataURL(f); };
   return html`<div class="grid" style="gap:16px;max-width:880px">
     <div><div class="h1">Найти товар на бирже</div>
@@ -106,9 +107,9 @@ function MarketsList() {
       <div class="row" style="flex-wrap:wrap;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)">
         <input class="inp" style="flex:1;min-width:160px" placeholder="Поиск товара" value=${qq} onInput=${e => setQ(e.target.value)}/>
         <select class="inp" value=${cat} onChange=${e => setCat(e.target.value)}><option value="">Все категории</option>${cats.map(c => html`<option>${c}</option>`)}</select></div>
-      <div class="tbl-wrap"><table class="tbl mk-tbl"><thead><tr><th>Товар</th><th>Оборот за год</th><th>Рост</th><th>Цена</th><th>Продавцов</th><th class="hide-m">Доля топ-3</th></tr></thead>
+      <div class="tbl-wrap"><table class="tbl mk-tbl"><thead><tr><th>Товар</th><th class="hide-m">Динамика</th><th>Оборот за год</th><th>Рост</th><th>Цена</th><th>Продавцов</th><th class="hide-m">Доля топ-3</th></tr></thead>
         <tbody>${shown.map(f => html`<tr class="click" onClick=${() => go("/markets/" + f.slug)}>
-          <td><b>${f.name}</b><div class="tiny muted">${f.category}</div></td><td class="mono">${short(f.volume_uzs)}</td>
+          <td><b>${f.name}</b><div class="tiny muted">${f.category}</div></td><td class="hide-m"><${Spark} data=${f.spark} w=${96} h=${28}/></td><td class="mono">${short(f.volume_uzs)}</td>
           <td class="mono ${cls(f.growth)}">${sgn(f.growth)}</td><td class="mono">${nf(f.price)}<span class="tiny muted"> /${unitS(f.unit)}</span></td>
           <td class="mono">${f.sellers}</td><td class="mono hide-m">${f.top3_share}%</td></tr>`)}</tbody></table></div>
       ${!list.length && html`<div class="empty"><span class="spin"/></div>`}
@@ -133,7 +134,7 @@ function VolChart({ d }) {
   return html`<div class="chart" style="height:260px" ref=${el}/>`;
 }
 
-function MarketDetail({ s }) {
+export function MarketDetail({ s, compact }) {
   const [d, setD] = useState(null);
   useEffect(() => { api("/api/insights/market/" + s).then(setD); }, [s]);
   if (!d) return html`<div class="empty"><span class="spin"/></div>`;

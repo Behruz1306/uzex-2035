@@ -50,6 +50,16 @@ def startup():
     core.NOTIFY_HOOKS.append(integrations.on_notify)
     integrations.start_telegram()
     market.load_history()
+
+    def warm():  # pre-compute analytics so the first demo click is instant
+        try:
+            insights.families(); insights.demos(); insights.overview()
+            for sl in ("ammonium-nitrate", "wheat-flour", "cement", "urea", "sugar"):
+                insights.family(sl)
+        except Exception as e:  # noqa: BLE001
+            print("warm-up failed:", e)
+    import threading as _t
+    _t.Thread(target=warm, daemon=True).start()
     if os.environ.get("ENGINE", "1") == "1":
         engine.start()
 
