@@ -105,3 +105,12 @@ cp .env.example .env   # ANTHROPIC_API_KEY=...
 cd app && ../.venv/bin/uvicorn server:app --port 8090
 # тест полного цикла сделки:  python tests/e2e.py http://localhost:8090
 ```
+
+## Лицензия / License
+
+[PolyForm Noncommercial 1.0.0](LICENSE). Код можно смотреть и использовать в некоммерческих целях (учёба, исследования, личные проекты) с сохранением указания автора.
+**Коммерческое использование — только по отдельному письменному договору с автором** ([@Behruz1306](https://github.com/Behruz1306)).
+
+Noncommercial use is permitted under PolyForm Noncommercial 1.0.0. Commercial use requires a separate written agreement with the author.
+
+Copyright (c) 2026 Bekhruz Abdurakhimov.
